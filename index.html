@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({ startOnLoad: true });
+  </script>
+</head>
+<body>
+  <div class="mermaid">
+graph TD;
+  __start__([__start__]):::first
+  supervisor(supervisor)
+  research_expert(research_expert)
+  math_expert(math_expert)
+  __end__([__end__]):::last
+  __start__ --> supervisor;
+  math_expert --> supervisor;
+  research_expert --> supervisor;
+  supervisor -.-> research_expert;
+  supervisor -.-> math_expert;
+  supervisor -.-> __end__;
+  classDef default fill:#f2f0ff,line-height:1.2
+  classDef first fill-opacity:0
+  classDef last fill:#bfb6fc
+  </div>
+</body>
+</html>
