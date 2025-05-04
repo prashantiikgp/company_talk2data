@@ -4,7 +4,7 @@ from enhancer_agent_tools.numeric_extractor import extract_numeric_constraints
 from enhancer_agent_tools.classify_category import classify_categories
 from enhancer_agent_tools.entity_extractor import extract_entities
 from enhancer_agent_tools.filter_composer import compose_filters
-from enhancer_agent_tools.rag_search_tool import rag_search_tool,RagSearchInput
+from enhancer_agent_tools.rag_search_tool import rag_search_fn, RagSearchInput
 
 # %%
 # Keyword extractor tool
@@ -80,14 +80,16 @@ filter_composer_tool = Tool(
 
 
 
+# RAG Search Tool
+# This tool performs a semantic search over startup documents using FAISS.
+
+
 from langchain_core.tools import Tool
 from enhancer_agent_tools.rag_search_tool import RagSearchInput  # Import RagSearchInput
 
-rag_vector_tool = Tool(
+rag_search_tool = Tool(
     name="rag_search_tool",
-    func=rag_search_tool,
+    func=rag_search_fn,
     description="Semantic search tool over startup documents using FAISS. Supports filters like sector, funding, location.",
     args_schema=RagSearchInput,
 )
-
-

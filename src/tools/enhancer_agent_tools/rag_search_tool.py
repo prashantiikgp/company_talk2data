@@ -9,34 +9,18 @@ from langchain.vectorstores import FAISS
 from langchain_openai import OpenAIEmbeddings
 from typing import List, Optional, Dict, Any
 
+from utils.path_config import get_base_dir ,get_vector_store_path
+
+
 # Path setup
-BASE_DIR = os.path.abspath(os.path.join(os.getcwd(), "..", ".."))
-VECTOR_STORE_PATH = os.path.join(BASE_DIR, "database", "vector_store", "faiss_fullrow_index")
+BASE_DIR = get_base_dir()
+
+os.path.abspath(os.path.join(os.getcwd(), "..", ".."))
+vector_path = get_vector_store_path()
 
 
-# %%
-# Caching FAISS index
-_vector_cache = {}
-
-def load_faiss_index(path: str = VECTOR_STORE_PATH) -> FAISS:
-    if path in _vector_cache:
-        return _vector_cache[path]
-
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"FAISS index not found at: {path}")
-
-# Load OpenAI embeddings
-    embeddings = OpenAIEmbeddings()
-
-# Load the FAISS index
-    faiss_index = FAISS.load_local(
-        path, 
-        embeddings, 
-        allow_dangerous_deserialization=True
-    )
-    
-    _vector_cache[path] = faiss_index
-    return faiss_index
+print(f"Vector store path: {vector_path}")
+print(f"Base directory: {BASE_DIR}")
 
 # %%
 # ✅ Input Schema
@@ -45,7 +29,7 @@ from pydantic import BaseModel, Field
 
 class RagSearchInput(BaseModel):
     query: str = Field(..., description="User's semantic query")
-    filters: Optional[Dict[str, Any]] = Field(default=None, description="Structured filters extracted")
+    #filters: Optional[Dict[str, Any]] = Field(default=None, description="Structured filters extracted")
     k: Optional[int] = Field(default=5, description="Number of results to return")
 
 
@@ -61,69 +45,85 @@ class RagSearchResult(BaseModel):
         }
 
 # %%
-# ✅ Core tool function
-def rag_search_tool(query: str, k: int = 5, filters: Optional[Dict[str, Any]] = None) -> Dict:
-    # Load vector store from cache or disk
-    if "vectorstore" in _vector_cache:
-        vectorstore = _vector_cache["vectorstore"]
+# Caching FAISS index
+_vector_cache = {}
+
+def load_vector_store(path: str = vector_path) -> FAISS:
+    if path in _vector_cache:
+        vectorstore = _vector_cache[VECTOR_STORE_PATH]
+
+    if not os.path.exists(path):
+        return RagSearchResult(results=[], message="Vector store not found.").dict()
+
+# Load OpenAI embeddings
+    embeddings = OpenAIEmbeddings()
+
+# Load the FAISS index
+    vector_store = FAISS.load_local(
+        path, 
+        embeddings, 
+        allow_dangerous_deserialization=True
+    )
+    
+    _vector_cache[path] = vector_store
+    return vector_store
+
+  
+print("FAISS index loaded successfully.")
+
+
+# %%
+def rag_search_fn(query: str, k: int = 5) -> Dict:
+    print(f"[RAG Tool] Query: {query}")
+    print(f"[RAG Tool] Top K: {k}")
+
+    if vector_path in _vector_cache:
+        print(f"[RAG Tool] Using cached vector store")
+        vectorstore = _vector_cache[vector_path]
     else:
-        if not os.path.exists(VECTOR_STORE_PATH):
+        if not os.path.exists(vector_path):
+            print(f"[ERROR] FAISS directory not found at {vector_path}")
             return RagSearchResult(results=[], message="Vector store not found.").dict()
 
+        print(f"[RAG Tool] Loading vector store from disk...")
         embeddings = OpenAIEmbeddings()
-        vectorstore = FAISS.load_local(
-            VECTOR_STORE_PATH,
-            embeddings,
-            allow_dangerous_deserialization=True
-        )
-        _vector_cache["vectorstore"] = vectorstore
+        try:
+            vectorstore = FAISS.load_local(
+                vector_path,
+                embeddings,
+                allow_dangerous_deserialization=True
+            )
+            _vector_cache[vector_path] = vectorstore
+            print("[RAG Tool] FAISS vector store loaded.")
+        except Exception as e:
+            print(f"[ERROR] Failed to load FAISS: {e}")
+            return RagSearchResult(results=[], message="Error loading vector store").dict()
 
-    # Perform the search (get more docs than needed for filtering)
-    raw_docs = vectorstore.similarity_search(query=query, k=20)
+    try:
+        raw_docs = vectorstore.similarity_search(query=query, k=k)
+        print(f"[RAG Tool] Retrieved {len(raw_docs)} documents.")
+    except Exception as e:
+        print(f"[ERROR] Similarity search failed: {e}")
+        return RagSearchResult(results=[], message="Vector search failed").dict()
 
-    # Manual filter
-    def matches_filters(doc_metadata: Dict[str, Any]) -> bool:
-        if not filters:
-            return True
-        for key, expected_value in filters.items():
-            if key not in doc_metadata:
-                return False
-            doc_val = doc_metadata[key]
-            # Support exact match, list match, or numeric comparison
-            if isinstance(expected_value, dict) and isinstance(doc_val, (int, float)):
-                if "gte" in expected_value and doc_val < expected_value["gte"]:
-                    return False
-                if "lte" in expected_value and doc_val > expected_value["lte"]:
-                    return False
-            elif isinstance(expected_value, list):
-                if doc_val not in expected_value:
-                    return False
-            elif doc_val != expected_value:
-                return False
-        return True
-
-    # Apply filtering
-    filtered_docs = [doc for doc in raw_docs if matches_filters(doc.metadata)]
-    final_docs = filtered_docs[:k]
-
-    if not final_docs:
-        return RagSearchResult(results=[], message="No matching documents after filtering.").dict()
+    if not raw_docs:
+        return RagSearchResult(results=[], message="No results found.").dict()
 
     return RagSearchResult(
-        results=[doc.page_content for doc in final_docs],
-        message=f"{len(final_docs)} documents matched filters."
+        results=[doc.page_content for doc in raw_docs],
+        message=f"Top {len(raw_docs)} documents returned."
     ).dict()
 
 
 # %%
 # ✅ Example usage
 if __name__ == "__main__":
-    query = "Find B2C , B2B or e-commerce startups in the SaaS and logistics space"
+    query = "Find B2C and e-commerce startups in the SaaS and logistics space"
     example_filters = {
     "industry_sector": ["SaaS", "Logistics"],
     "product_categories": ["B2B", "B2C", "E-commerce"]
 }
-    result = rag_search_tool(query=query, k=5, filters=example_filters)
+    result = rag_search_fn(query=query, k=5)
     
 
     if result["results"]:
