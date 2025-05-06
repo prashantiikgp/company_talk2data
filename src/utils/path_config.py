@@ -48,3 +48,15 @@ def get_data_path() -> str:
     return os.path.join(get_base_dir(), "Data", "Enriched_Indian_Startup_Dataset.csv")
 print(f"Data path: {get_data_path()}")
 
+
+
+
+# Get the Schema Path for Qdrant Store 
+
+def get_schema_path() -> str:
+    " GET Qdrant Schema Path "
+
+    base_dir = get_base_dir()
+
+    return os.path.join(base_dir, "schema", "payload_schema.json")
+print(f"Schema path: {get_schema_path()}")
