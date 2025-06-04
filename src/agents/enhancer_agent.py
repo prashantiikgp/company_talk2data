@@ -11,7 +11,7 @@ print(f"BASE_DIR: {BASE_DIR}")
 
 
 # 🔁 Import all tools from registry
-from tools.enhancer_tools_registry import (
+from src.tools.tools_registry import (
     keyword_extractor_tool,
     extract_numeric_constraints_tool,
     filter_composer_tool
@@ -46,7 +46,7 @@ print(f"BASE_DIR: {BASE_DIR}")
 
 
 # 🔁 Import all tools from registry
-from tools.enhancer_tools_registry import (
+from src.tools.tools_registry import (
     keyword_extractor_tool,
     extract_numeric_constraints_tool,
     filter_composer_tool
