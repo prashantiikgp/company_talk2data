@@ -4,7 +4,7 @@
 # The script defines a function `keyword_extractor_fn` that takes a query string as input.
 
 import re
-from typing import Dict, Any
+from typing import Dict, List, Any
 from langchain_core.tools import Tool
 
 FILTERABLE_FIELDS: Dict[str, list] = {
@@ -126,9 +126,9 @@ FILTERABLE_FIELDS: Dict[str, list] = {
 }
 
 
-def keyword_extractor_fn(query: str) -> Dict[str, str]:
+def keyword_extractor_fn(query: str) -> Dict[str, List[str]]:
     query_lower = query.lower()
-    result: Dict[str, Any] = {}
+    result: Dict[str, List[str]] = {}
 
     for field, keywords in FILTERABLE_FIELDS.items():
         matched = [kw for kw in keywords if kw in query_lower]
