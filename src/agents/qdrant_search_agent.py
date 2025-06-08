@@ -27,7 +27,8 @@ from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
 
 # %%
-from tools.tools_registry import qdrant_search_tool
+# 🔁 Import all tools from registry
+from tools.qdrant_tools_registry import qdrant_search_tool
 
 # %%
 # Define tools for the enhancer agent
