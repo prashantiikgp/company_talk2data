@@ -1,20 +1,16 @@
-from typing import TypedDict
+from typing import TypedDict, List, Dict, Optional
 
-class AgentState(TypedDict):
-    messages: list
-    metadata: dict
-    rag_result: str
-    graph_result: str
-    evaluation: str
+class AgentState(TypedDict, total=False):
+    """Shared memory state for LangGraph agents."""
 
-# Updated FilterState class
-from typing import List, Dict, Any, Optional
-from langchain_core.messages import BaseMessage
-from typing_extensions import TypedDict
-
-class AgentState(TypedDict):
-    messages: List[BaseMessage]
-    query: str
-    filters: Optional[Dict[str, Any]]
+    input_query: str
+    enhanced_query: Optional[str]
+    filters: Optional[dict]
     k: Optional[int]
-    results: Optional[List[str]]
+    actions: Optional[List[str]]
+    observations: Optional[List[str]]
+    messages: List[dict] 
+    final_response: Optional[str]
+    agent_name: Optional[str]
+    tools_Calls: Optional[List[Dict[str, str]]]
+    tools_results: Optional[List[Dict[str, str]]]

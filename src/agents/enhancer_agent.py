@@ -1,21 +1,22 @@
 # %%
-import os
-import sys
+# Ensure src/ is in sys.path so 'tools' can be imported
+# %%
+import sys, os
+try:
+    # ✅ Running from a Python script (.py file)
+    TOOLS_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+except NameError:
+    # ✅ Running from a Jupyter notebook (__file__ is not defined)
+    TOOLS_PATH = os.path.abspath(os.path.join(os.getcwd(), ".."))
+SRC_PATH = os.path.join(TOOLS_PATH)
 
-# Go up one level to reach src/
-BASE_DIR = os.path.abspath(os.path.join(os.getcwd(), "..", "tools"))
-if BASE_DIR not in sys.path:
-    sys.path.insert(0, BASE_DIR)
 
-print(f"BASE_DIR: {BASE_DIR}")
+if SRC_PATH not in sys.path:
+    sys.path.insert(0, SRC_PATH)
+    print(f"✅ SRC path added: {SRC_PATH}")
+else:
+    print(f"🔁 SRC path already in sys.path: {SRC_PATH}")
 
-
-# 🔁 Import all tools from registry
-from src.tools.tools_registry import (
-    keyword_extractor_tool,
-    extract_numeric_constraints_tool,
-    filter_composer_tool
-)
 
 # %%
 # -- Enhancer Agent --
@@ -36,17 +37,8 @@ from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
 
 
-
-# Go up one level to reach src/
-BASE_DIR = os.path.abspath(os.path.join(os.getcwd(), "..", "tools"))
-if BASE_DIR not in sys.path:
-    sys.path.insert(0, BASE_DIR)
-
-print(f"BASE_DIR: {BASE_DIR}")
-
-
 # 🔁 Import all tools from registry
-from src.tools.tools_registry import (
+from tools.enhancer_tools_registry import (
     keyword_extractor_tool,
     extract_numeric_constraints_tool,
     filter_composer_tool
@@ -75,24 +67,65 @@ tool_help_text = "\n".join(
 # Define system prompt used during agent creation
 
 enhancer_agent_prompt_template = PromptTemplate.from_template(
-    """You are an advanced query enhancer agent.
-Your role is to analyze vague or unstructured queries, extract key information, and transform them into clear, structured metadata and filters.
-Use tools like keyword extractor, numeric constraint extractor, and category classifiers to accomplish this.
-Only use the tools to extract structure. Do not generate final answers or ask the user again.
+    """You are a Query Enhancer Agent.
+
+Your task is to:
+1. Understand the user's query and its intent.
+2. Clarify any ambiguities or vague instructions.
+3. Add contextual details such as location, industry, amount, category, or other metadata if implied.
+4. Output an improved version of the query, optimized for semantic and structured search.
+
+Rules:
+- Do not ask follow-up questions.
+- Infer likely meanings when user input is ambiguous.
+- Your output should be a standalone, precise query in natural language.
+- Do not include explanations or formatting like “Here’s the improved query.”
+
+Example:
+1. Fuzzy Funding Reference → Structured Numeric + Stage Filter
+User Query: "Startups with big funding"
+Enhanced Prompt: "Indian startups that raised over $10 million in Series A or later funding rounds."
+Focus: Adds monetary threshold and filters funding stage.
+
+2. Location Mention → Structured Geographic Filter
+User Query: "Top SaaS companies in Bangalore"
+Enhanced Prompt: "Top-performing SaaS startups headquartered in Bengaluru with recent traction or funding activity."
+Focus: Resolves city + domain, adds optional temporal or traction filter.
+
+🔹 3. Team Size Mention → Employee Count Filter
+User Query: "Companies with large teams working in AI"
+Enhanced Prompt: "AI-focused startups in India with over 200 employees and active hiring status."
+Focus: Converts “large team” into a numeric filter + hiring signal.
+
+🔹 4. Recent Growth Mention → Year + Funding Filter
+User Query: "Fast-growing e-commerce startups"
+Enhanced Prompt: "E-commerce startups founded after 2018 with rapid growth and multiple funding rounds."
+Focus: Infers growth using founding year and number of rounds.
+
+🔹 5. Tech Stack Mention → Tool + Sector Filters
+User Query: "Fintech companies using AWS and React"
+Enhanced Prompt: "Fintech startups with a tech stack including AWS and React, offering scalable B2C solutions."
+Focus: Extracts cloud/backend/frontend tech + sector.
+
+
 
 You have access to the following tools:
 {tools}
 
-Use the following format:
+Format:
+Question: the input query
+Thought: think step-by-step about what to extract
+Action: the tool to use, from [{tool_names}]
+Action Input: JSON string or plain text input to the tool
+Observation: result returned by the tool
+... (repeat Thought/Action/Observation as needed)
+Thought: I have gathered all necessary structured data.
+Final Answer: a dictionary of all extracted metadata and filters
 
-Question: the input question you must analyze
-Thought: you should always think about what to do
-Action: the action to take, should be one of [{tool_names}]
-Action Input: the input to the action
-Observation: the result of the action
-... (this Thought/Action/Action Input/Observation can repeat N times)
-Thought: I now know the structured metadata
-Final Answer: the structured metadata or filters extracted
+Constraints:
+- NEVER ask the user again
+- ONLY use tools
+- NEVER hallucinate missing data
 
 Begin!
 
@@ -118,58 +151,85 @@ enhancer_agent = create_react_agent(
     )
 
 
-# %%
-def enhancer_node(state: dict) -> Command[Literal["supervisor"]]:
-    """
-    Enhancer node for refining and structuring vague user queries.
+from typing import Literal, List, Dict
+from langchain_core.agents import AgentAction, AgentFinish
+from langchain_core.messages import HumanMessage
+from schema.agent_state import AgentState
 
-    Returns:
-        Command: Enhanced message sent back to the supervisor with reasoning.
+def enhancer_node(state: AgentState) -> Command[Literal["supervisor"]]:
+    """
+    React‑style Enhancer Agent Node.
+
+    1. Streams through the pre‑configured enhancer_agent (with your tool prompt).
+    2. Captures internal actions and observations.
+    3. Parses its final Python dict output: enhanced_query, filters, k.
+    4. Updates the shared AgentState with full trace logs.
+    5. Routes control back to 'supervisor'.
     """
 
-    # 🧾 Instructional system message — passed as part of prompt to guide behavior
-    system_prompt = (
-        "You are an advanced query enhancer. Your task is to:\n"
-        "- Clarify and refine vague or ambiguous user inputs.\n"
-        "- Extract metadata using tools (industry, funding stage, filters).\n"
-        "- NEVER generate final answers, only enhance the query.\n"
-        "- Return your reasoning and structured results back to the supervisor."
+    # ─── Disable the agent’s built‑in verbose logging ───────────────────────
+    enhancer_agent.verbose = False
+
+    # ─── Prepare collectors for this invocation ────────────────────────────
+    actions: List[str] = []
+    observations: List[str] = []
+    final_output = None
+
+    # ─── Stream the React‑style loop ──────────────────────────────────────
+    # We pass in only the conversation history; the agent already knows its system prompt & tools.
+    for step in enhancer_agent.stream({"messages": state.get("messages", [])}):
+        if isinstance(step, AgentAction):
+            # Tool choice or internal thought
+            actions.append(str(step.log))
+        elif isinstance(step, AgentFinish):
+            # Final result from the agent: expected to be a Python dict
+            final_output = step.return_values.get("output")
+        else:
+            # Intermediate tool output
+            observations.append(str(step))
+
+    # ─── Parse the agent’s final output dict (or fallback) ─────────────────
+    if isinstance(final_output, dict):
+        enhanced_query = final_output.get("enhanced_query", "")
+        filters = final_output.get("filters", {})
+        k = final_output.get("k", None)
+        message_content = str(final_output)
+    else:
+        # Fallback if agent returned something unexpected
+        enhanced_query = ""
+        filters = {}
+        k = None
+        message_content = str(final_output) if final_output is not None else ""
+
+    # ─── Append a completion marker and summary to the logs ────────────────
+    new_actions = (
+        state.get("actions", [])
+        + actions
+        + ["Enhancer agent completed"]
+    )
+    new_observations = (
+        state.get("observations", [])
+        + observations
+        + [
+            f"Enhanced Query: {enhanced_query}",
+            f"Filters: {filters}",
+            f"k: {k}",
+        ]
     )
 
-    # 🧠 Compose messages for the agent
-    messages = [{"role": "system", "content": system_prompt}] + state["messages"]
-
-    # 🚀 Invoke the agent (you can use `invoke()` or stream if needed)
-    enhanced_response = enhancer_agent.invoke(messages)
-
-    print("🧩 Enhancer Node executed. Routing back to: supervisor")
-
+    # ─── Return the updated state and route back to the supervisor ─────────
     return Command(
         update={
             "messages": [
-                HumanMessage(
-                    content=enhanced_response.content,
-                    name="enhancer"
-                )
-            ]
+                HumanMessage(content=message_content, name="enhancer")
+            ],
+            "enhanced_query": enhanced_query,
+            "filters": filters,
+            "k": k,
+            "actions": new_actions,
+            "observations": new_observations,
+            "agent_name": "enhancer",
         },
         goto="supervisor"
     )
-
-
-
-# %%
-from langchain.agents import AgentExecutor
-
-executor = AgentExecutor(agent=enhancer_agent, tools=enhancer_tools, verbose=True, handle_parsing_errors=True)
-
-query = """
-
-List D2C or SaaS companies in Delhi or Hyderabad that raised over ₹200 crore, are currently hiring for engineers and PMs, valued above $500 million, 
-
-offer mobile apps or APIs, and are backed by Sequoia or Accel."""
-
-result = executor.invoke({"input": query})
-print(result["output"])
-
 

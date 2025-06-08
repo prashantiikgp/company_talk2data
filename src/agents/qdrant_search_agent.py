@@ -1,4 +1,19 @@
+# %%
+import sys, os
+try:
+    # ✅ Running from a Python script (.py file)
+    TOOLS_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..",))
+except NameError:
+    # ✅ Running from a Jupyter notebook (__file__ is not defined)
+    TOOLS_PATH = os.path.abspath(os.path.join(os.getcwd(), ".."))
 
+SRC_PATH = os.path.join(TOOLS_PATH)
+
+if SRC_PATH not in sys.path:
+    sys.path.insert(0, SRC_PATH)
+    print(f"✅ SRC path added: {SRC_PATH}")
+else:
+    print(f"🔁 SRC path already in sys.path: {SRC_PATH}")
 
 # %%
 # 2) Import LangChain and your tools
@@ -134,31 +149,90 @@ qdrant_agent = create_react_agent(
 )
 
 
-# %%
-from langchain.agents import AgentExecutor
+# src/nodes/quadrant_search_node.py
 
-executor = AgentExecutor(agent=qdrant_agent, 
-                         tools=qdrant_agent_tools, 
-                         verbose=True, 
-                         handle_parsing_errors=True)
+from typing import Literal, List
+from langchain_core.agents import AgentAction, AgentFinish
+from langchain_core.messages import HumanMessage
+from langgraph.types import Command
+from schema.agent_state import AgentState
 
-query = """List D2C or SaaS companies in Delhi or Hyderabad"""
-    
-filters = {
-        "total_funding_raised_inr": {"gte": 200},    # ₹200 cr+
-        "hiring_status": "actively hiring",
-        "industry_sector": "saas",                   # or "d2c"
-        "lead_investors": "sequoia, accel",
-        }
+# Assumes you have already created and imported your React‑style Qdrant agent:
+# from src.agents import qdrant_search_agent
 
-k=5
+def quadrant_search_node(state: AgentState) -> Command[Literal["__end__"]]:
+    """
+    React‑style Qdrant Search Node:
+    - Takes enhanced_query, filters, and k from AgentState.
+    - Streams the pre‑configured qdrant_search_agent (with verbose=False).
+    - Captures internal AgentAction steps and tool Observations.
+    - Parses the final Python dict output into `results` & `reasoning`.
+    - Updates AgentState with:
+        • messages          – the raw dict output as a HumanMessage
+        • retrieved_results – the list of result dicts
+        • final_response    – any summary the agent returned
+        • actions/observations – full trace logs
+    - Routes to "__end__" to terminate the workflow.
+    """
 
+    # Turn off built‑in console logging to avoid duplicate prints
+    qdrant_agent.verbose = False
 
-# 3️⃣ Invoke!
+    # Collectors for this invocation
+    actions: List[str] = []
+    observations: List[str] = []
+    final_output = None
 
-result = executor.invoke({"query": query, "filters": filters, "k": k})
-print(result["output"])
+    # Build the payload we send into the agent
+    payload = {
+        "messages": state.get("messages", []),
+        "enhanced_query": state.get("enhanced_query"),
+        "filters": state.get("filters"),
+        "k": state.get("k"),
+    }
 
+    # Stream through the React loop
+    for step in qdrant_agent.stream(payload):
+        if isinstance(step, AgentAction):
+            # Agent decided to call a tool or perform an internal action
+            actions.append(str(step.log))
+        elif isinstance(step, AgentFinish):
+            # Agent finished: expect a Python dict in step.return_values["output"]
+            final_output = step.return_values.get("output")
+        else:
+            # Intermediate tool output or observation
+            observations.append(str(step))
 
+    # Parse the final dict or fallback
+    if isinstance(final_output, dict):
+        results = final_output.get("results", [])
+        reasoning = final_output.get("reasoning", "")
+        message_content = str(final_output)
+    else:
+        results = []
+        reasoning = ""
+        message_content = str(final_output) if final_output is not None else ""
 
+    # Build full trace logs
+    new_actions = state.get("actions", []) + actions + ["Qdrant Search completed"]
+    new_observations = (
+        state.get("observations", [])
+        + observations
+        + [f"Results count: {len(results)}", f"Reasoning: {reasoning}"]
+    )
+
+    # Return updated state; "__end__" signals graph termination
+    return Command(
+        update={
+            "messages": [
+                HumanMessage(content=message_content, name="qdrant_search")
+            ],
+            "retrieved_results": results,
+            "final_response": reasoning,
+            "actions": new_actions,
+            "observations": new_observations,
+            "agent_name": "qdrant_search",
+        },
+        goto="__end__"
+    )
 
