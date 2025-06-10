@@ -11,9 +11,10 @@ SRC_PATH = os.path.join(TOOLS_PATH)
 
 if SRC_PATH not in sys.path:
     sys.path.insert(0, SRC_PATH)
-    print(f"✅ SRC path added: {SRC_PATH}")
+    #print(f"✅ SRC path added: {SRC_PATH}")
 else:
-    print(f"🔁 SRC path already in sys.path: {SRC_PATH}")
+    pass
+    #print(f"🔁 SRC path already in sys.path: {SRC_PATH}")
 
 
 # src/agents/supervisor_agent.py

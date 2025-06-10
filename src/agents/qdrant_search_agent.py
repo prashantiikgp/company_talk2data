@@ -1,4 +1,5 @@
 # %%
+# %%
 import sys, os
 try:
     # ✅ Running from a Python script (.py file)
@@ -14,6 +15,7 @@ if SRC_PATH not in sys.path:
     print(f"✅ SRC path added: {SRC_PATH}")
 else:
     print(f"🔁 SRC path already in sys.path: {SRC_PATH}")
+    
 
 # %%
 # 2) Import LangChain and your tools
