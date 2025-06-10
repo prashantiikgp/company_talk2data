@@ -16,6 +16,7 @@ if SRC_PATH not in sys.path:
     print(f"✅ SRC path added: {SRC_PATH}")
 else:
     print(f"🔁 SRC path already in sys.path: {SRC_PATH}")
+    
 
 
 # %%
@@ -25,7 +26,6 @@ else:
 # The agent is designed to work with the LangChain framework and utilizes OpenAI's GPT-4 model.
 # The agent is capable of using various tools such as keyword extractors, numeric constraint extractors, and category classifiers.
 
-import os
 import sys
 from langchain_core.tools import Tool
 from langchain.agents import create_react_agent

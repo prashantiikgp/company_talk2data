@@ -1,7 +1,8 @@
 # stream_app.py
+from Test_Agent_scripts import evaluator_agent, graph_agent
 import streamlit as st
 from langgraph.graph import StateGraph
-from agents import rag_agent, graph_agent, evaluator_agent, enhancer_agent, supervisor
+from agents import rag_agent, enhancer_agent, supervisor
 from workflow import workflow  # precompiled LangGraph workflow
 
 # For state management

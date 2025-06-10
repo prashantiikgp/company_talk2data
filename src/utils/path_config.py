@@ -36,7 +36,7 @@ def get_qdrant_store_path(subfolder: str = "collection") -> str:
     base_dir = get_base_dir()
     return os.path.join(base_dir, "database", "qdrant_store_local_db", subfolder)
 
-print(f"Qdrant store path: {get_qdrant_store_path()}")
+#print(f"Qdrant store path: {get_qdrant_store_path()}")
 
 
 import os
@@ -46,7 +46,7 @@ import os
 def get_data_path() -> str:
     base_dir = get_base_dir()
     return os.path.join(get_base_dir(), "Data", "Enriched_Indian_Startup_Dataset.csv")
-print(f"Data path: {get_data_path()}")
+#print(f"Data path: {get_data_path()}")
 
 
 
@@ -59,4 +59,4 @@ def get_schema_path() -> str:
     base_dir = get_base_dir()
 
     return os.path.join(base_dir, "schema", "payload_schema.json")
-print(f"Schema path: {get_schema_path()}")
+#print(f"Schema path: {get_schema_path()}")
