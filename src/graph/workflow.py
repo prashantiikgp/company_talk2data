@@ -53,7 +53,7 @@ def build_graph():
     builder.add_edge(START, "supervisor")
     builder.add_edge("supervisor", "enhancer")
     builder.add_edge("enhancer", "supervisor")
-    builder.add_edge("supervisor", "qdrant_search")
+    #builder.add_edge("supervisor", "qdrant_search")
 
     # Mark the end node
     builder.set_finish_point("qdrant_search")

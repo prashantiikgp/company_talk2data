@@ -31,7 +31,8 @@ from langchain.prompts import PromptTemplate
 from tools.qdrant_tools_registry import qdrant_search_tool
 
 # %%
-# Define tools for the enhancer agent
+# Define tools for the qdrant agent
+
 qdrant_agent_tools = [
     qdrant_search_tool,
 ]
@@ -48,87 +49,43 @@ tool_help_text = "\n".join(
 )
 
 # Define system prompt used during agent creation
-
 qdrant_agent_prompt_template = PromptTemplate.from_template(
     """
-Role :
-You are the Qdrant Search Tool, a micro-service that combines high-fidelity vector embeddings with rich, structured metadata filtering to retrieve the most relevant records from a Qdrant collection.
+Role:
+You are the Qdrant Search Agent.
+You have one tool:  {tool_names}
 
-Description & Purpose :
--- Given a natural-language query, an optional dictionary of filters (exact matches or numeric ranges), and a desired result count k, your job is to:
--- Embed the query via OpenAI.
--- Translate filters into Qdrant payload conditions.
--- Execute a hybrid semantic + metadata search.
--- Return the top-k hits, each with its id, similarity score, and full payload metadata.
+     - takes a Python dictionary with keys "query", "filters", and "k"
+     
+     
+Description & Purpose:
+-Your job is to:
+    - Embed the query via OpenAI.
+    - Translate filters into Qdrant payload conditions.
+    - Execute a hybrid semantic + metadata search.
+    - Return the top-k hits, each with its id, similarity score, and full payload metadata.
 
-Inputs (Parameters) :
-query (string) - free-text search string.
-filters (dict) - {filters}
-Exact: ( "state": "delhi", "industry_sector": "saas" )
-Range: ( "year_founded": ("gte":2000,"lte":2010) )
-k (integer) – the number of top results to return.
+Inputs (Parameters):
+You will receive a single Python dict as {input}, containing keys:
+  • input["query"]   – the enhanced natural‑language query
+  • input["filters"] – a dict of exact/range filters
+  • input["k"]       – the integer top‑K
 
-Examples :
-Pure semantic (no filters)
-qdrant_search(
-  query="emerging agritech startups",
-  filters=None,
-  k=5
-)
-# → returns top-5 agritech vectors by relevance
-Metadata only
+Follow exactly this ReAct format (no extra braces!):
 
-qdrant_search(
-  query="",
-  filters=( "state": "karnataka", "industry_sector": "fintech" ),
-  k=10
-)
-# → returns any fintech startups in Karnataka, ordered by vector‐default rank
-Hybrid (semantic + filters + range)
-
-qdrant_search(
-  query="best B2B platforms",
-  filters=(
-    "state": "delhi",
-    "year_founded": ("gte":2015),
-    "industry_sector": "saas"
-  ),
-  k=3
-)
-# → returns top-3 SaaS B2B startups in Delhi founded ≥2015
-
-Guidelines & Constraints
--- Must apply both vector similarity and all payload filters.
--- For textual filters use exact keyword match.
--- For numeric filters support gte / lte semantics.
--- If filters=None, perform a pure semantic lookup.
--- Always return at most k results.
--- Never omit an entry’s payload.
--- Ensure consistent lower-casing of filter values and field names.
--- Never return more than k results, even if multiple entries have the same score.
-
--- If no results match, return an empty list [].
-
-
-Format:
-Question: the input query
-Thought: think step-by-step about what to extract
-Action: the tool to use, from [{tool_names}]
-Action Input: JSON string or plain text input to the tool
-Observation: result returned by the tool
-... (repeat Thought/Action/Observation as needed)
-Thought: I have gathered all necessary structured data.
-Final Answer: a dictionary of all extracted metadata and filters
-
-Constraints:
-- NEVER ask the user again
-- ONLY use tools
-- NEVER hallucinate missing data
+Question: {input}
+Thought: decide how to call the tool
+Action: {tool_names}
+Action Input: {{"query": "{{input[query]}}", "filters": {{input[filters]}}, "k": {{input[k]}} }}
+Observation: <tool output>
+Thought: I have the results
+Final Answer: <a Python list of result dicts>
 
 Begin!
 
-Question: {{input}}
-{agent_scratchpad}"""
+Question: {input}
+{agent_scratchpad}
+"""
 )
 
 
@@ -139,7 +96,7 @@ formatted_prompt = qdrant_agent_prompt_template.partial(
 )
 
 # 🔧 Define the React-style agent
-llm = ChatOpenAI(model="gpt-4o") 
+llm = ChatOpenAI(model="gpt-4o",temperature=0.0) 
 
 
 # Create the agent
@@ -147,93 +104,104 @@ qdrant_agent = create_react_agent(
     llm=llm,
     tools=qdrant_agent_tools,
     prompt=formatted_prompt,
-)
+    )
+
 
 
 # src/nodes/quadrant_search_node.py
 
-from typing import Literal, List
+# src/nodes/quadrant_search_node.py
+
+# src/nodes/quadrant_search_node.py
+from typing import Any, Dict, List, Literal
 from langchain_core.agents import AgentAction, AgentFinish
 from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 from schema.agent_state import AgentState
+# Use the existing qdrant_agent defined in previous cells
 
-# Assumes you have already created and imported your React‑style Qdrant agent:
-# from src.agents import qdrant_search_agent
+def normalize_messages(raw_msgs: List[Any]) -> List[Dict[str, str]]:
+    """
+    Same normalization as in enhancer_node.
+    """
+    normalized = []
+    for m in raw_msgs:
+        if isinstance(m, HumanMessage):
+            normalized.append({
+                "role": m.name,
+                "content": m.content
+            })
+        else:
+            normalized.append(m)
+    return normalized
 
 def quadrant_search_node(state: AgentState) -> Command[Literal["__end__"]]:
     """
-    React‑style Qdrant Search Node:
-    - Takes enhanced_query, filters, and k from AgentState.
-    - Streams the pre‑configured qdrant_search_agent (with verbose=False).
-    - Captures internal AgentAction steps and tool Observations.
-    - Parses the final Python dict output into `results` & `reasoning`.
-    - Updates AgentState with:
-        • messages          – the raw dict output as a HumanMessage
-        • retrieved_results – the list of result dicts
-        • final_response    – any summary the agent returned
-        • actions/observations – full trace logs
-    - Routes to "__end__" to terminate the workflow.
+    1) Normalize history
+    2) Build a single-string search_input from enhanced_query, filters, k
+    3) Stream qdrant_search_agent over {"input":search_input, "intermediate_steps":[]}
+    4) Parse results & reasoning
+    5) Append a new dict message and update state
+    6) Route to "__end__"
     """
+    # ─── 1) Normalize chat history ────────────────────────
+    msgs = normalize_messages(state.get("messages", []))
 
-    # Turn off built‑in console logging to avoid duplicate prints
-    qdrant_agent.verbose = False
+    # ─── 2) Extract search parameters ────────────────────
+    q = state.get("enhanced_query", "")
+    f = state.get("filters", {})
+    k = state.get("k", 5)
 
-    # Collectors for this invocation
+    search_input = (
+        f"QUERY:\n{q}\n\n"
+        f"FILTERS:\n{f}\n\n"
+        f"K:\n{k}"
+    )
+
+    # ─── 3) Stream the agent ──────────────────────────────
     actions: List[str] = []
     observations: List[str] = []
-    final_output = None
+    final_output: Any = None
 
-    # Build the payload we send into the agent
-    payload = {
-        "messages": state.get("messages", []),
-        "enhanced_query": state.get("enhanced_query"),
-        "filters": state.get("filters"),
-        "k": state.get("k"),
-    }
-
-    # Stream through the React loop
+    payload = {"input": search_input, "intermediate_steps": []}
     for step in qdrant_agent.stream(payload):
         if isinstance(step, AgentAction):
-            # Agent decided to call a tool or perform an internal action
             actions.append(str(step.log))
         elif isinstance(step, AgentFinish):
-            # Agent finished: expect a Python dict in step.return_values["output"]
             final_output = step.return_values.get("output")
         else:
-            # Intermediate tool output or observation
             observations.append(str(step))
 
-    # Parse the final dict or fallback
+    # ─── 4) Parse the final output ───────────────────────
     if isinstance(final_output, dict):
-        results = final_output.get("results", [])
+        results   = final_output.get("results", [])
         reasoning = final_output.get("reasoning", "")
-        message_content = str(final_output)
+        msg_text  = str(final_output)
     else:
-        results = []
-        reasoning = ""
-        message_content = str(final_output) if final_output is not None else ""
+        results, reasoning = [], ""
+        msg_text = str(final_output) if final_output is not None else ""
 
-    # Build full trace logs
-    new_actions = state.get("actions", []) + actions + ["Qdrant Search completed"]
+    # ─── 5) Build logs & append new message ──────────────
+    new_actions      = state.get("actions", []) + actions + ["Qdrant search completed"]
     new_observations = (
         state.get("observations", [])
         + observations
-        + [f"Results count: {len(results)}", f"Reasoning: {reasoning}"]
+        + [
+            f"Results count: {len(results)}",
+            f"Reasoning: {reasoning}"
+        ]
     )
+    msgs.append({"role": "qdrant_search", "content": msg_text})
 
-    # Return updated state; "__end__" signals graph termination
+    # ─── 6) Return update & end the graph ───────────────
     return Command(
         update={
-            "messages": [
-                HumanMessage(content=message_content, name="qdrant_search")
-            ],
+            "messages":          msgs,
             "retrieved_results": results,
-            "final_response": reasoning,
-            "actions": new_actions,
-            "observations": new_observations,
-            "agent_name": "qdrant_search",
+            "final_response":    reasoning,
+            "actions":           new_actions,
+            "observations":      new_observations,
+            "agent_name":        "qdrant_search",
         },
         goto="__end__"
     )
-

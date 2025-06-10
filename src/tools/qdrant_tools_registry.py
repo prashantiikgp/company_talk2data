@@ -24,11 +24,18 @@ qdrant_search_tool_instance = QdrantSearchTool(
 
 def wrapped_qdrant_search(inputs: dict) -> list:
     import json
+    
+    # 1️⃣ If they sent you a JSON string, parse it:
     if isinstance(inputs, str):
         try:
             inputs = json.loads(inputs)
-        except Exception:
+        except json.JSONDecodeError:
             raise ValueError("Tool input is not a valid JSON dictionary.")
+        
+    if not isinstance(inputs, dict):
+        raise ValueError("Tool input must be a dict or JSON string representing a dict.")
+    
+    # 2️⃣ Otherwise (a dict), just use it:
     query = inputs.get("query", "")
     filters = inputs.get("filters", None)
     k = inputs.get("k", 5)
