@@ -27,8 +27,11 @@ else:
 # ────────────────────────────────────
 class KeywordExtractInput(BaseModel):
     """Just pass the raw user query."""
-    text: str = Field(..., description="Original natural‑language question")
-
+    text: str = Field(
+        ...,
+        description="Original natural‑language question",
+        alias="query",              # <- extra accepted key
+    )
 class KeywordExtractOutput(RootModel[Dict[str, List[str]]]):
     """
     Maps each recognised payload‑field to the list of keyword‑strings
