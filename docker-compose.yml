@@ -1,21 +1,33 @@
 version: '3.8'
 
+# Docker Compose file for Qdrant vector database with Studio UI
+
 services:
   qdrant:
-    image: qdrant/qdrant
+    image: qdrant/qdrant:latest
     container_name: qdrant_server
     ports:
-      - "6333:6333"
-      - "6334:6334"
+      - "6333:6333"   # REST API
+      - "6334:6334"   # Web UI
     volumes:
       - ./src/databases/qdrant_store:/qdrant/storage
     restart: unless-stopped
     environment:
+      # storage
       - QDRANT__STORAGE__BACKEND=local
       - QDRANT__STORAGE__PATH=/qdrant/storage
-      - QDRANT__REST_PORT="6333"
-      - QDRANT__GRPC_PORT="6334"
-      - QDRANT__LOG_LEVEL=info
+
+      # API ports
+      - QDRANT__REST__PORT=6333
+      - QDRANT__GRPC__PORT=6335
+
+      # enable the web UI
+      - QDRANT__UI__ENABLED=true
+      - QDRANT__UI__HTTP_PORT=6334
+
+      # logging & backup
+      - QDRANT__LOG__LEVEL=info
       - QDRANT__PERSISTENCE__BACKUP__ENABLED=true
       - QDRANT__PERSISTENCE__BACKUP__PATH=/qdrant/storage/backup
-      - QDRANT__PERSISTENCE__BACKUP__INTERVAL="3600"
+      - QDRANT__PERSISTENCE__BACKUP__INTERVAL=3600
+      - QDRANT__PERSISTENCE__BACKUP__MAX_BACKUPS=5
