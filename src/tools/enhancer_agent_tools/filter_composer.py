@@ -20,27 +20,25 @@ def merge_values(existing, new):
     else:
         return existing
 
-def compose_filters(*tools_outputs: str) -> Dict[str, Any]:
-    final_filters = {}
+def compose_filters(*filter_dicts: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Merge multiple filter-dicts into one.
 
-    for tool_output_str in tools_outputs:
-        try:
-            tool_output = json.loads(tool_output_str)
-            if not isinstance(tool_output, dict):
-                continue
-        except json.JSONDecodeError:
-            continue  # skip if it's not valid JSON
+    All arguments **must** be dictionaries. If a non-dict sneaks in, raise
+    a clear error so the bug is obvious immediately.
+    """
+    merged: Dict[str, Any] = {}
 
-        for key, value in tool_output.items():
-            if not value:
-                continue
-            if key in final_filters:
-                final_filters[key] = merge_values(final_filters[key], value)
-            else:
-                final_filters[key] = value
+    for idx, d in enumerate(filter_dicts, start=1):
+        if not isinstance(d, dict):
+            raise TypeError(
+                f"compose_filters argument #{idx} is {type(d).__name__}; "
+                "expected a dict. Check upstream tool outputs."
+            )
+        # simple shallow merge: later dicts overwrite earlier keys
+        merged.update(d)
 
-    return final_filters
-
+    return merged
 
 
 # %%

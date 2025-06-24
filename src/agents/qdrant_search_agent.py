@@ -25,8 +25,13 @@ from langchain_core.messages import HumanMessage
 from langgraph.prebuilt import ToolNode
 from langgraph.types import Command
 from typing import Literal
-from langchain_openai import ChatOpenAI
+#from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
+from langchain_together import ChatTogether
+from langchain.agents import create_structured_chat_agent, AgentExecutor
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_together import ChatTogether
+import os
 
 # %%
 # 🔁 Import all tools from registry
@@ -34,7 +39,7 @@ from tools.qdrant_tools_registry import qdrant_search_tool
 
 # %%
 # Define tools for the qdrant agent
-
+# Define tools for the enhancer agent
 qdrant_agent_tools = [
     qdrant_search_tool,
 ]
@@ -52,41 +57,62 @@ tool_help_text = "\n".join(
 
 # Define system prompt used during agent creation
 qdrant_agent_prompt_template = PromptTemplate.from_template(
-    """
-Role:
-You are the Qdrant Search Agent.
-You have one tool:  {tool_names}
+"""
+Respond to the human as helpfully and accurately as possible. You have access to the following tools:
 
-     - takes a Python dictionary with keys "query", "filters", and "k"
-     
-     
-Description & Purpose:
--Your job is to:
-    - Embed the query via OpenAI.
-    - Translate filters into Qdrant payload conditions.
-    - Execute a hybrid semantic + metadata search.
-    - Return the top-k hits, each with its id, similarity score, and full payload metadata.
+{tool_names}
 
-Inputs (Parameters):
-You will receive a single Python dict as {input}, containing keys:
-  • input["query"]   – the enhanced natural‑language query
-  • input["filters"] – a dict of exact/range filters
-  • input["k"]       – the integer top‑K
+Rules:
+1. Respond with ONE valid JSON object only.
+2. Keys and string values use double quotes.
+3. Valid actions: "qdrant_search" or "Final Answer".
+4. For "Final Answer" the value of "action_input"
+   **must be a raw JSON array** (the results list) – no wrapper object, no quotes.
 
-Follow exactly this ReAct format (no extra braces!):
+Example final answer:
+{{
+  "action": "Final Answer",
+  "action_input": [
+    {{"id":123,"score":0.83,"payload":{{...}} }},
+    ...
+  ]
+}}
 
+Use a json blob to specify a tool by providing an action key (tool name) and an action_input key (tool input).
+Valid "action" values: "Final Answer" or {tool_names}
+Provide only ONE action per $JSON_BLOB, as shown:
+```
+{{
+  "action": $TOOL_NAME,
+  "action_input": $INPUT
+}}
+```
+
+Follow this format:
 Question: {input}
-Thought: decide how to call the tool
-Action: {tool_names}
-Action Input: {{"query": "{{input[query]}}", "filters": {{input[filters]}}, "k": {{input[k]}} }}
-Observation: <tool output>
-Thought: I have the results
-Final Answer: <a Python list of result dicts>
+Thought: consider previous and subsequent steps
+Action:
+```
+$JSON_BLOB
+```
+Observation: action result
+... (repeat Thought/Action/Observation N times)
+Thought: I know what to respond
+Action:
+```
+{{
+  "action": "Final Answer",
+  "action_input":  I have the final answer in a raw JSON array format only nothing else.
+}}
+```
 
-Begin!
+Begin! Reminder to ALWAYS respond with a valid json blob of a single action. Use tools if necessary. Respond directly if appropriate. Format is Action:```$JSON_BLOB```then Observation
 
-Question: {input}
+Human!
+{input}
+
 {agent_scratchpad}
+ (reminder to respond in a JSON blob no matter what)
 """
 )
 
@@ -98,16 +124,29 @@ formatted_prompt = qdrant_agent_prompt_template.partial(
 )
 
 # 🔧 Define the React-style agent
-llm = ChatOpenAI(model="gpt-4o",temperature=0.0) 
+#llm = ChatOpenAI(model="gpt-4o",temperature=0.0) 
+llm_search = ChatTogether(model="meta-llama/Llama-3.3-70B-Instruct-Turbo", 
+                            temperature=0,
+                            api_key=os.getenv("together_ai_api_key"))
 
 
-# Create the agent
-qdrant_agent = create_react_agent(
-    llm=llm,
+
+# Define the structured agent
+qdrant_search_agent = create_structured_chat_agent(
+    llm=llm_search,
     tools=qdrant_agent_tools,
     prompt=formatted_prompt,
     )
 
+    # Define the agent executor
+qdrant_agent_executor = AgentExecutor(
+        agent=qdrant_search_agent,
+        tools=qdrant_agent_tools,
+        verbose=True,
+        handle_parsing_errors=True,
+        return_only_outputs=True,
+        max_iterations=3
+    )
 
 
 # src/nodes/quadrant_search_node.py
@@ -166,7 +205,7 @@ def quadrant_search_node(state: AgentState) -> Command[Literal["__end__"]]:
     final_output: Any = None
 
     payload = {"input": search_input, "intermediate_steps": []}
-    for step in qdrant_agent.stream(payload):
+    for step in qdrant_search_agent.stream(payload):
         if isinstance(step, AgentAction):
             actions.append(str(step.log))
         elif isinstance(step, AgentFinish):

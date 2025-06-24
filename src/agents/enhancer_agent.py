@@ -26,45 +26,39 @@ else:
 # The agent is designed to work with the LangChain framework and utilizes OpenAI's GPT-4 model.
 # The agent is capable of using various tools such as keyword extractors, numeric constraint extractors, and category classifiers.
 
-import sys
+# -- Enhancer Agent --
+# This script sets up an agent that enhances queries by extracting structured metadata and filters.
+# It uses a set of tools to analyze and transform vague or unstructured queries into clear, structured metadata.
+# The agent is designed to work with the LangChain framework and utilizes OpenAI's GPT-4 model.
+# The agent is capable of using various tools such as keyword extractors, numeric constraint extractors, and category classifiers.
+
 from langchain_core.tools import Tool
 from langchain.agents import create_react_agent
 from langchain_core.messages import HumanMessage
 from langgraph.prebuilt import ToolNode
 from langgraph.types import Command
 from typing import Literal
-from langchain_openai import ChatOpenAI
+#from langchain_openai import ChatOpenAI
+from langchain_together import ChatTogether
 from langchain.prompts import PromptTemplate
+from dotenv import load_dotenv
+load_dotenv()
+
 
 
 # 🔁 Import all tools from registry
 from tools.enhancer_tools_registry import (
     keyword_extractor_tool,
-    extract_numeric_constraints_tool,
+    numeric_constraint_tool,
     filter_composer_tool
 )
 
 # Define tools for the enhancer agent
 enhancer_tools = [
     keyword_extractor_tool,
-    extract_numeric_constraints_tool,
+    numeric_constraint_tool,
     filter_composer_tool
 ]
-
-
-# Define tool names for the agent
-tool_names = [tool.name for tool in enhancer_tools]
-
-# Define the tool descriptions
-tool_descriptions = [tool.description for tool in enhancer_tools]
-
-# Build readable tool help text for the prompt
-tool_help_text = "\n".join(
-    [f"{i+1}. {tool.name} - {tool.description}" for i, tool in enumerate(enhancer_tools)]
-)
-
-
-# Define system prompt used during agent creation
 
 # Define tool names for the agent
 tool_names = [tool.name for tool in enhancer_tools]
@@ -81,41 +75,69 @@ tool_help_text = "\n".join(
 # Define system prompt used during agent creation
 
 enhancer_agent_prompt_template = PromptTemplate.from_template(
-    """You are a Query Enhancer Agent.
-
-Rules:
-- Do not ask follow-up questions.
-- Infer likely meanings when user input is ambiguous.
-- Use the tools provided to extract structured metadata from user queries.
-
+"""You are the **Query‑Enhancer Agent**.
 You have access to the following tools:
-{tools}
+{tool_names}
 
-Use **exactly** this format (no extra text):
+Use a json blob to specify a tool by providing an action key (tool name) and an action_input key (tool input).
+Valid "action" values: "Final Answer" or {tool_names}
+Provide only ONE action per $JSON_BLOB, as shown:
 
-Thought→Action→Observation→Thought→Final Answer 
+```
+{{
+  "action": $TOOL_NAME,
+  "action_input": $INPUT
+}}
 
+
+Follow this format:
 Question: {input}
+Thought: consider previous and subsequent steps
+Action:
+```
+$JSON_BLOB
+```
+Observation: action result
+... (repeat Thought/Action/Observation N times)
 
-Thought: what to do next
-Action: keyword_extractor
-Action Input: {input}
-Observation: ["B2B","SaaS","startups","India"]
+Thought: I know what to respond
+Action:
+```
+{{
+  "action": "Final Answer",
+  "action_input": {{
+    "query":   "<string>",
+    "filters": {{ ... }} | null,
+    "k":       <int>
+  }}
+}}
+```
+Example final answer:
+Action:
+```json
+{{
+  "action": "Final Answer",
+  "action_input": {{
+    "query": "B2B SaaS startups",
+    "filters": {{
+      "industry_sector": ["b2b", "saas"],
+      "location": "India",
+      "company_type": "startup"
+    }},
+    "k": 5
+  }}
+}}
+IMPORTANT RULE:
+- Only call "filter_composer" when you already have at least one filter.
+- If numeric extractor returns {{}}, proceed directly to the Final Answer.
+Begin! Reminder to ALWAYS respond with a valid json blob of a single action. Use tools if necessary. Respond directly if appropriate. Format is Action:```$JSON_BLOB```then Observation
 
-Thought: now extract numeric constraints
-Action: extract_numeric_constraints
-Action Input: "5"
-Observation: {{"k":5}}
 
-Thought: I have all I need.
-Final Answer:
-{{"enhanced_query":"List 5 B2B SaaS startups in India",
-  "filters":{{"industry":"SaaS","region":"India"}},
-  "k":5}}
+Human!
+{input}
 
-Begin!
-Question: {input}
 {agent_scratchpad}
+ (reminder to respond in a JSON blob no matter what)
 """)
 
 # Format the prompt with tool descriptions and names
@@ -125,15 +147,32 @@ formatted_prompt = enhancer_agent_prompt_template.partial(
 )
 
 # 🔧 Define the React-style agent
-llm = ChatOpenAI(model="gpt-4o",temperature=0)  # Or use your preferred model
+#llm = ChatOpenAI(model="gpt-4o",temperature=0)  # Or use your preferred model
 
 
-# Create the agent
-enhancer_agent = create_react_agent(
-    llm=llm,
+llm_enhancer = ChatTogether(model="mistralai/Mistral-7B-Instruct-v0.2",
+                            temperature=0,
+                            api_key=os.getenv("together_ai_api_key"))
+
+
+#create the agent with the tools and formatted prompt
+from langchain.agents import create_structured_chat_agent, AgentExecutor
+from schema.tools_schema import EnhanceInput, EnhanceOutput 
+
+enhancer_agent = create_structured_chat_agent(
+    llm=llm_enhancer,
     tools=enhancer_tools,
     prompt=formatted_prompt,
-    )
+)
+
+
+from langchain.agents import AgentExecutor
+
+enhancer_executor = AgentExecutor(agent=enhancer_agent, 
+                         tools=enhancer_tools, 
+                         verbose=True, 
+                         handle_parsing_errors=True)
+
 
 # src/nodes/enhancer_node.py
 

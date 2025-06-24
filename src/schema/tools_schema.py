@@ -27,11 +27,7 @@ else:
 # ────────────────────────────────────
 class KeywordExtractInput(BaseModel):
     """Just pass the raw user query."""
-    text: str = Field(
-        ...,
-        description="Original natural‑language question",
-        alias="query",              # <- extra accepted key
-    )
+    query: str = Field(...,description="Original natural‑language question",)
 class KeywordExtractOutput(RootModel[Dict[str, List[str]]]):
     """
     Maps each recognised payload‑field to the list of keyword‑strings
@@ -49,7 +45,7 @@ class KeywordExtractOutput(RootModel[Dict[str, List[str]]]):
 # 0‑B. Numeric‑constraint extractor
 # ────────────────────────────────────
 class NumericConstraintInput(BaseModel):
-    text: str = Field(..., description="Original natural‑language question")
+    query: str = Field(..., description="Original natural‑language question")
 
 class RangeConstraint(BaseModel):
     gte: float | int | None = None
@@ -76,9 +72,9 @@ class SingleFilterDict(RootModel[Dict[str, Any]]):
 
 class FilterComposeInput(BaseModel):
     """Pass a *list* of filter‑dicts that need to be merged."""
-    filters: List[SingleFilterDict] = Field(
+    filters: SingleFilterDict = Field(
         ...,
-        description="Outputs from keyword‑extractor / numeric‑constraint tools."
+        description="A single filter dict from keyword/numeric extractors."
     )
 
 class FilterComposeOutput(RootModel[Dict[str, Any]]):
