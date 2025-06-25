@@ -1,38 +1,57 @@
-# %%
-import sys, os
-try:
-    # ✅ Running from a Python script (.py file)
-    TOOLS_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__)))
-except NameError:
-    # ✅ Running from a Jupyter notebook (__file__ is not defined)
-    TOOLS_PATH = os.path.abspath(os.path.join(os.getcwd()))
-
-SRC_PATH = os.path.join(TOOLS_PATH)
-
-if SRC_PATH not in sys.path:
-    sys.path.insert(0, SRC_PATH)
-    print(f"✅ SRC path added: {SRC_PATH}")
-else:
-    print(f"🔁 SRC path already in sys.path: {SRC_PATH}")
-
-
 # fastapi_app.py
+
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Union
-from .main import run_enhancer_agent  # 👈 import from main.py
+from typing import List
+
+# Optional: import your actual enhancer agent
+from .main import run_enhancer_agent
 
 app = FastAPI()
 
+# Allow frontend (Flutter web or emulator) to connect
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Replace with specific origin in production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 @app.get("/")
 def read_root():
-    return {"message": "Your backend is alive!"}
+    return {"message": "Backend is alive!"}
 
+
+# ✅ This supports your current Flutter UI
+@app.get("/get_companies")
+async def get_companies():
+    return [
+        {
+            "name": "Zyphra AI",
+            "location": "Bangalore, India",
+            "sector": "B2B SaaS",
+            "funding": "10M USD",
+            "founded_year": 2021,
+            "description": "AI-powered document intelligence platform."
+        },
+        {
+            "name": "ClariPay",
+            "location": "Delhi, India",
+            "sector": "Cross-border Payments",
+            "funding": "5M USD",
+            "founded_year": 2020,
+            "description": "Simplifies global vendor payments for exporters."
+        }
+    ]
+
+
+# ✅ This is future-facing (for chat input / enhanced search)
 class QueryRequest(BaseModel):
     query: str
 
-
 @app.post("/chat")
 async def chat(request: QueryRequest):
-    result= run_enhancer_agent(request.query)
+    result = run_enhancer_agent(request.query)
     return result
